@@ -51,3 +51,8 @@ rsconnect/
 # Large data files (raw downloads and processed matrices) - never commit
 data/raw/
 data/processed/*.rds
+
+# Large intermediate files - keep local only
+results/mofa_model.hdf5
+results/tables/meth_filtered_samples_by_features.csv
+results/tables/rna_filtered_samples_by_features.csv
