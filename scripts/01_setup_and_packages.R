@@ -82,3 +82,90 @@ class(rna_data)
 saveRDS(rna_data, "data/processed/tcga_brca_rna_raw.rds")
 
 
+
+# 05_query_methylation_data.R
+# Query TCGA-BRCA DNA methylation (450K array) data, matched to the
+# same tumor/normal samples used for RNA-seq.
+
+library(TCGAbiolinks)
+
+query_meth <- GDCquery(
+  project = "TCGA-BRCA",
+  data.category = "DNA Methylation",
+  platform = "Illumina Human Methylation 450",
+  data.type = "Methylation Beta Value",
+  sample.type = c("Primary Tumor", "Solid Tissue Normal")
+)
+
+meth_results <- getResults(query_meth)
+dim(meth_results)
+table(meth_results$sample_type)
+
+
+# 06_download_methylation_data.R
+# Estimate size before downloading (methylation arrays are large)
+
+library(TCGAbiolinks)
+
+# GDCquery already ran; just inspect estimated size via query metadata
+sum(meth_results$file_size) / 1e9  # approximate size in GB
+
+# Download DNA methylation beta values for the 890 matched tumor/normal samples
+
+library(TCGAbiolinks)
+
+GDCdownload(query_meth, directory = "data/raw")
+
+
+
+# 07_prepare_methylation_matrix.R
+# Manually assemble the methylation beta-value matrix from the
+# downloaded per-sample files (bypassing GDCprepare, which requires
+# the sesame/sesameData packages not yet available for this
+# Bioconductor version).
+
+meth_files <- list.files("data/raw", pattern = "methylation_array.*betas.*\\.txt$",
+                         recursive = TRUE, full.names = TRUE)
+length(meth_files)
+head(meth_files, 3)
+
+# Peek at the raw content of a single methylation file before
+# writing the full assembly script
+readLines(meth_files[1], n = 5)
+
+
+# 07_prepare_methylation_matrix.R
+# Manually assemble the methylation beta-value matrix (CpG probes x samples)
+# from the downloaded per-sample files, bypassing GDCprepare/sesame.
+
+library(data.table)
+
+meth_files <- list.files("data/raw", pattern = "methylation_array.*betas.*\\.txt$",
+                         recursive = TRUE, full.names = TRUE)
+
+file_uuids <- basename(dirname(meth_files))
+
+read_one_sample <- function(path) {
+  dt <- fread(path, header = FALSE, col.names = c("probe_id", "beta"))
+  dt$beta
+}
+
+message("Reading first file to get probe order...")
+first_dt <- fread(meth_files[1], header = FALSE, col.names = c("probe_id", "beta"))
+probe_ids <- first_dt$probe_id
+
+message("Reading remaining ", length(meth_files), " files...")
+beta_list <- lapply(seq_along(meth_files), function(i) {
+  if (i %% 100 == 0) message("  ...", i, " / ", length(meth_files))
+  read_one_sample(meth_files[i])
+})
+
+beta_matrix <- do.call(cbind, beta_list)
+rownames(beta_matrix) <- probe_ids
+colnames(beta_matrix) <- file_uuids
+
+message("Final matrix dimensions: ", nrow(beta_matrix), " x ", ncol(beta_matrix))
+
+saveRDS(beta_matrix, "data/processed/tcga_brca_methylation_matrix.rds")
+
+message("Done. Saved to data/processed/tcga_brca_methylation_matrix.rds")
